@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>A World Away — Exoplanet Finder (Flask)</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    :root{
+      --bg-deep:#050914; --text:#f1f5ff; --muted:#aeb9d8;
+      --glass-strong:rgba(16,22,48,.86); --glass-soft:rgba(18,24,52,.72);
+      --inner:rgba(255,255,255,.04); --border:rgba(255,255,255,.10);
+      --accent-1:#7c3aed; --accent-2:#06b6d4; --accent-3:#f59e0b;
+      --success:#22c55e; --danger:#ef4444;
+    }
+    html,body{height:100%}
+    body{
+      color:var(--text); overflow-x:hidden;
+      background:
+        radial-gradient(1200px 800px at 65% -10%, #0c1331 0%, var(--bg-deep) 45%, #03060d 85%),
+        conic-gradient(from 210deg at 30% 20%, rgba(124,58,237,.25), rgba(6,182,212,.2), rgba(245,158,11,.2), rgba(124,58,237,.25));
+      background-attachment: fixed, fixed;
+    }
+
+    /* background and planets */
+    #starfield, #numbers, #nebula, #meteors, #flashLayer, .twinkle, .belt { position:fixed; inset:0; pointer-events:none }
+    #starfield{ z-index:-8 }
+    #nebula{ z-index:-6; opacity:.40; mix-blend-mode:screen; transition: opacity .45s ease }
+    #numbers{ z-index:-5; opacity:.10; mix-blend-mode:screen }
+    #meteors{ z-index:-4 }
+    #flashLayer{
+      z-index:-3; opacity:0; transition: opacity 520ms ease; mix-blend-mode:screen;
+      background:
+        radial-gradient(30vw 30vh at 15% 30%, rgba(170,200,255,.30), transparent 70%),
+        radial-gradient(40vw 35vh at 80% 20%, rgba(180,210,255,.28), transparent 70%),
+        radial-gradient(50vw 45vh at 60% 80%, rgba(230,190,130,.16), transparent 75%);
+      filter: saturate(130%);
+    }
+    .meteor-pass #flashLayer{ opacity:.33 }
+    .meteor-pass #nebula{ opacity:.70 }
+
+    .planet{ position:absolute; border-radius:50%; background-size:cover; background-position:center;
+      filter: drop-shadow(0 30px 60px rgba(0,0,0,.5)) saturate(110%);
+      animation: float 18s ease-in-out infinite, spin 160s linear infinite; }
+    .planet::after{ content:""; position:absolute; inset:-6%; border-radius:50%;
+      background: radial-gradient(60% 60% at 50% 50%, rgba(255,255,255,.08), transparent 70%); }
+    @keyframes float{ 0%,100%{ transform: translate3d(0,0,0) } 50%{ transform: translate3d(0,-8px,0) } }
+    @keyframes spin{ from{ transform:rotate(0deg) } to{ transform:rotate(360deg) } }
+    .p-earth{  width:min(22vw,360px); height:min(22vw,360px); left:max(4vw,24px); top:16vh; transform: translateZ(120px);
+      background-image:url('https://upload.wikimedia.org/wikipedia/commons/9/96/Kepler186f-ArtistConcept-20140417.jpg') }
+    .p-jupiter{width:min(26vw,440px); height:min(26vw,440px); right:max(6vw,24px); top:8vh;  transform: translateZ(60px) scale(1.04);
+      background-image:url('https://upload.wikimedia.org/wikipedia/commons/5/5a/Jupiter_by_Cassini-Huygens.jpg') }
+    .p-saturn{ width:min(24vw,420px); height:min(24vw,420px); left:55%; bottom:6vh; transform: translateZ(30px) scale(1.02);
+      background-image:url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') }
+    .p-mars{   width:min(14vw,240px); height:min(14vw,240px); left:12%;  bottom:5vh; transform: translateZ(140px) scale(1.06);
+      background-image:url('https://upload.wikimedia.org/wikipedia/commons/0/02/OSIRIS_Mars_true_color.jpg') }
+    .p-neptune{width:min(16vw,260px); height:min(16vw,260px); right:12%; bottom:8vh; transform: translateZ(100px) scale(1.05);
+      background-image:url('https://upload.wikimedia.org/wikipedia/commons/5/56/Neptune_Full.jpg') }
+
+    .orbit{ position:absolute; border-radius:50%; border:1px dashed rgba(255,255,255,.15); animation: orbit-drift 22s ease-in-out infinite; filter:blur(.4px) }
+    @keyframes orbit-drift{ 0%,100%{ transform: rotate(0deg) scale(1) } 50%{ transform: rotate(8deg) scale(1.03) } }
+    .o1{ width:56vw; height:56vw; left:22vw; top:-6vw }
+    .o2{ width:40vw; height:40vw; right:8vw; top:20vh; animation-delay:.8s }
+    .o3{ width:48vw; height:48vw; left:-10vw; bottom:-12vw; animation-delay:.4s }
+
+    /* general ui panels */
+    .panel{
+      position:relative; border-radius:20px;
+      background: linear-gradient(180deg, var(--glass-strong), rgba(13,18,40,.88));
+      border:1px solid var(--border); overflow:hidden;
+      box-shadow: inset 0 1px 0 var(--inner), 0 10px 30px rgba(0,0,0,.35);
+      backdrop-filter: blur(14px);
+    }
+    .panel:before{
+      content:""; position:absolute; inset:-1px; border-radius:22px; z-index:0;
+      background: linear-gradient(135deg, rgba(124,58,237,.6), rgba(6,182,212,.45), rgba(245,158,11,.35));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask-composite: exclude;
+      padding:1px; pointer-events:none; opacity:.45; filter: blur(.5px);
+    }
+    .panel > *{ position:relative; z-index:1 }
+    .panel-soft{ border-radius:18px; background: linear-gradient(180deg, var(--glass-soft), rgba(15,20,44,.8)); border:1px solid rgba(255,255,255,.1); backdrop-filter: blur(12px) }
+
+    .card-title{ font-weight:800; letter-spacing:.3px }
+    .muted{ color:var(--muted) }
+    .btn{
+      padding:10px 16px; border-radius:16px; font-weight:700;
+      background: linear-gradient(135deg, var(--accent-1), var(--accent-2), var(--accent-3));
+      color:#fff; box-shadow:0 12px 28px rgba(6,182,212,.35);
+      transition: transform .18s ease, filter .18s ease, box-shadow .18s ease;
+    }
+    .btn:hover{ transform: translateY(-1px); filter: brightness(1.07); box-shadow:0 14px 32px rgba(124,58,237,.35) }
+
+    input[type="number"], input[type="text"], input[type="file"]{
+      width:100%; padding:10px 12px; border-radius:12px; outline:none;
+      background:#101a3a; border:1px solid rgba(255,255,255,.16); color:#fff;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    .label{ font-size:12px; color:#cfe1ff; margin-bottom:6px }
+    .grid-form{ display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:12px }
+    @media(min-width:1024px){ .grid-form{ grid-template-columns: repeat(3,minmax(0,1fr)) } }
+
+    .pill{ display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; font-size:12px; font-weight:800; background:#16224a; border:1px solid rgba(255,255,255,.16) }
+    .pill.hover-effect:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .success{ background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.38); color:#a7f3d0 }
+    .danger { background: rgba(239,68,68,.16); border-color: rgba(239,68,68,.38); color:#fecaca }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace }
+
+    /* --- Audio Widget --- */
+    .audio-widget{ position: fixed; right: 18px; bottom: 18px; z-index: 50 }
+    .eq { display:inline-flex; gap:3px; margin-left:8px }
+    .bar{ width:3px; height:10px; background:linear-gradient(180deg,#a78bfa,#22d3ee); border-radius:2px; opacity:.9; animation: bounce 1s ease-in-out infinite; }
+    .bar:nth-child(2){ animation-delay:.15s } .bar:nth-child(3){ animation-delay:.3s } .bar:nth-child(4){ animation-delay:.45s }
+    @keyframes bounce{ 0%,100%{ height:6px } 50%{ height:16px } }
+
+    /* --- Planet Visualization (enhanced) --- */
+    .planet-preview{
+      position:relative;
+      width:100%;
+      aspect-ratio:1/1;
+      border-radius:50%;
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.12);
+      background:#050914;
+      background-position:center;
+      background-size:cover;
+      box-shadow:0 20px 60px rgba(0,0,0,.45);
+      --planet-img: url('https://upload.wikimedia.org/wikipedia/commons/9/96/Kepler186f-ArtistConcept-20140417.jpg');
+      --starfield-img: url('https://upload.wikimedia.org/wikipedia/commons/0/09/Starsinthesky.jpg');
+      --glow: radial-gradient(60% 60% at 50% 40%, rgba(160,190,255,.18), rgba(0,0,0,0) 70%);
+    }
+    .planet-preview::before{
+      content:""; position:absolute; inset:-3%; border-radius:50%;
+      background: radial-gradient(60% 60% at 50% 50%, rgba(255,255,255,.06), transparent 70%);
+    }
+    .planet-core{
+      position:absolute; inset:0; border-radius:50%;
+      background-image: var(--planet-img);
+      background-size: cover; background-position: 0 50%;
+      filter: saturate(115%) contrast(105%) brightness(100%);
+      animation: planet-rotate 42s linear infinite;
+    }
+    .planet-ring{
+      position:absolute; inset:-14%; border-radius:50%;
+      background:
+        radial-gradient(50% 50% at 50% 50%, rgba(255,255,255,.08), rgba(255,255,255,0) 60%),
+        repeating-linear-gradient(90deg, rgba(240,230,255,.18) 0 3px, rgba(200,210,255,.05) 3px 6px);
+      transform: rotateX(65deg) rotateZ(-18deg);
+      filter: blur(.5px);
+      opacity: 0; transition: opacity .35s ease; pointer-events:none;
+    }
+    .planet-terminator{
+      position:absolute; inset:0; border-radius:50%;
+      background:
+        radial-gradient(120% 120% at 20% 35%, rgba(0,0,0,0) 58%, rgba(0,0,0,.35) 78%, rgba(0,0,0,.78) 100%),
+        var(--glow);
+      animation: day-night 16s ease-in-out infinite; pointer-events:none;
+    }
+    .reticle{
+      position:absolute; inset:0; border-radius:50%;
+      background:
+        radial-gradient(85% 85% at 50% 50%, rgba(0,0,0,.0) 62%, rgba(0,0,0,.55) 100%),
+        var(--starfield-img);
+      background-size: cover; display:none; filter: saturate(110%);
+    }
+    .reticle::after{
+      content:""; position:absolute; inset:0;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(255,255,255,.35) 0 1px, transparent 2px),
+        linear-gradient(rgba(255,255,255,.25), rgba(255,255,255,.25)),
+        linear-gradient(90deg, rgba(255,255,255,.25), rgba(255,255,255,.25));
+      background-size: 100% 1px, 1px 100%, 100% 100%;
+      background-repeat:no-repeat; background-position:center;
+      mix-blend-mode: screen; opacity:.7;
+    }
+    .planet-shadow{
+      position:absolute; inset:0; border-radius:50%;
+      background: radial-gradient(120% 120% at 30% 30%, rgba(0,0,0,0) 62%, rgba(0,0,0,.35) 78%, rgba(0,0,0,.75) 100%);
+      pointer-events:none;
+    }
+
+    /* state toggles */
+    #planetPreview.state-confirmed .planet-core{ opacity:1 }
+    #planetPreview.state-confirmed .planet-ring{ opacity:.7 }
+    #planetPreview.state-no-transit .planet-core,
+    #planetPreview.state-no-transit .planet-ring,
+    #planetPreview.state-no-transit .planet-terminator{ display:none }
+    #planetPreview.state-no-transit .reticle{ display:block }
+
+    /* animations */
+    @keyframes planet-rotate{
+      0%{ background-position: 0% 50% } 100%{ background-position: 100% 50% }
+    }
+    @keyframes day-night{
+      0%,100%{ filter: brightness(100%) } 50%{ filter: brightness(108%) }
+    }
+  </style>
+
+</head>
+<body>
+
+  <canvas id="starfield"></canvas>
+  <div id="nebula"></div>
+  <canvas id="numbers"></canvas>
+  <canvas id="meteors"></canvas>
+  <div id="flashLayer"></div>
+  <div class="twinkle" aria-hidden="true"></div>
+
+  <div class="belt" aria-hidden="true">
+    <div class="orbit o1"></div><div class="orbit o2"></div><div class="orbit o3"></div>
+    <div class="planet p-earth"></div>
+    <div class="planet p-jupiter"></div>
+    <div class="planet p-saturn"></div>
+    <div class="planet p-mars"></div>
+    <div class="planet p-neptune"></div>
+  </div>
+
+  <header class="max-w-7xl mx-auto px-4 pt-10">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+      <div>
+        <h1 class="text-3xl lg:text-4xl font-extrabold tracking-tight">A World Away — Exoplanet Finder</h1>
+      </div>
+      <a href="https://www.nasa.gov/" target="_blank" rel="noopener" class="panel-soft rounded-2xl p-3 flex items-center gap-4">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg" alt="NASA" class="w-12 h-12 object-contain">
+        <div>
+          <div class="text-sm muted">Online</div>
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#10b981]"></span><span class="font-semibold">NASA</span></div>
+        </div>
+      </a>
+    </div>
+
+    <div class="panel-soft rounded-2xl p-4 mt-6 flex flex-wrap items-center gap-4">
+      <div><div class="text-sm muted">Model(s)</div><div id="modelName" class="font-semibold">Loading…</div></div>
+      <div class="w-px h-10 bg-white/10"></div>
+      <div><div class="text-sm muted">Default Threshold</div><div><span id="defaultThr" class="font-semibold mono">0.50</span></div></div>
+      <div class="w-px h-10 bg-white/10"></div>
+      <div class="flex items-center gap-3">
+        <label class="inline-flex items-center gap-2 cursor-pointer"><input id="hpSwitch" type="checkbox" class="accent-cyan-400"><span class="text-sm">High-Precision Mode</span></label>
+        <span class="pill">thr=<span id="hpThr">0.950</span></span>
+      </div>
+      <div class="flex items-center gap-2 ml-auto">
+        <span class="muted text-sm">Presets:</span>
+        <button class="pill hover-effect" id="preset1">Sample #1 (LC)</button>
+        <button class="pill hover-effect" id="preset2">Sample #2 (Tab)</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="col-span-2 space-y-6">
+        <!-- Astronomical panel: buttons moved to bottom -->
+        <div class="panel p-6">
+          <div class="card-title mb-4">Astronomical Input (Light Curve & CNN)</div>
+          <div class="grid-form">
+            <div><div class="label">Mission ID (TESS/Kepler/K2)</div><input id="astro_mission" type="text" placeholder="e.g., TESS" value="TESS"></div>
+            <div><div class="label">Target ID (TIC/KIC/EPIC)</div><input id="astro_target" type="text" placeholder="e.g., 247008310" value="247008310"></div>
+            <div><div class="label">Period (days)</div><input id="astro_period" type="number" step="any" placeholder="e.g., 37.4243" value="37.4243"></div>
+            <div><div class="label">T0 (Transit Center Epoch, JD)</div><input id="astro_t0" type="number" step="any" placeholder="e.g., 2458872.2858" value="2458872.2858"></div>
+          </div>
+          <div id="astroStatus" class="muted mt-3 text-sm">Use the above fields for CNN/Ensemble prediction.</div>
+          <div class="flex justify-end gap-3 mt-5 pt-4 border-t border-white/10">
+            <button id="btnPredictAstronomical" class="btn">Predict (CNN)</button>
+            <button id="btnEnsemble" class="btn">Ensemble (Tabular + CNN)</button>
+          </div>
+        </div>
+
+        <!-- Tabular panel: button moved to bottom -->
+        <div class="panel p-6">
+          <div class="card-title mb-4">Tabular Input (ML Features)</div>
+          <div class="grid-form">
+            <div><div class="label">koi_period (days)</div><input id="koi_period" type="number" step="any" placeholder="e.g., 100"></div>
+            <div><div class="label">koi_depth (ppm)</div><input id="koi_depth" type="number" step="any" placeholder="e.g., 500"></div>
+            <div><div class="label">koi_duration (hours)</div><input id="koi_duration" type="number" step="any" placeholder="e.g., 10"></div>
+            <div><div class="label">koi_kepmag</div><input id="koi_kepmag" type="number" step="any" placeholder="14.3"></div>
+            <div><div class="label">koi_prad</div><input id="koi_prad" type="number" step="any" placeholder="1.3"></div>
+            <div><div class="label">koi_srad</div><input id="koi_srad" type="number" step="any" placeholder="1.0"></div>
+            <div><div class="label">koi_steff</div><input id="koi_steff" type="number" step="1" placeholder="5700"></div>
+            <div><div class="label">koi_depth_err1</div><input id="koi_depth_err1" type="number" step="any" placeholder="50"></div>
+            <div><div class="label">koi_duration_err1</div><input id="koi_duration_err1" type="number" step="any" placeholder="0.1"></div>
+            <div><div class="label">koi_period_err1</div><input id="koi_period_err1" type="number" step="any" placeholder="0.01"></div>
+          </div>
+          <div class="mt-5 flex items-center gap-3 flex-wrap">
+             <a id="downloadCsv" class="pill hover-effect" download="sample_exoplanets.csv" href="#">Download Sample CSV</a>
+          </div>
+          <div class="flex justify-end mt-5 pt-4 border-t border-white/10">
+            <button id="btnPredictTabular" class="btn">Predict (Tabular)</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel p-6">
+        <div class="card-title mb-2">Prediction Result</div>
+        <div id="resultBox" class="space-y-2">
+          <div class="text-3xl font-extrabold mono">0.500000</div>
+          <div><span class="pill danger">NO DATA</span></div>
+          <div class="muted mt-2 text-xs">Model: N/A - Threshold used: <span class="mono">0.500</span></div>
+        </div>
+        <hr class="my-4 border-white/10">
+        <div class="card-title mb-2">Planet Visualization</div>
+        <div id="planetPreview" class="planet-preview">
+          <!-- Rotating planet core -->
+          <div class="planet-core"></div>
+
+          <!-- Subtle ring (only visible when confirmed) -->
+          <div class="planet-ring"></div>
+
+          <!-- Day/Night terminator & highlight -->
+          <div class="planet-terminator"></div>
+
+          <!-- An overlay used for the 'no transit' state (reticle) -->
+          <div class="reticle"></div>
+
+          <!-- Existing vignette -->
+          <div class="planet-shadow"></div>
+        </div>
+        <div id="planetCaption" class="muted text-xs mt-2">Awaiting prediction…</div>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="panel p-6">
+        <div class="card-title mb-2">Observed (Phase-Folded) Light Curve</div>
+        <canvas id="lcObserved" height="220"></canvas>
+      </div>
+      <div class="panel p-6">
+        <div class="card-title mb-2">Transit Model (Binned Data)</div>
+        <canvas id="lcModel" height="220"></canvas>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="panel p-6 col-span-2">
+        <div class="card-title mb-4">Batch Prediction (CSV)</div>
+        <form id="batchForm" class="flex items-center gap-4">
+          <input id="csvFile" type="file" accept=".csv" class="block w-full text-sm">
+          <button class="btn" type="submit">Upload & Predict</button>
+        </form>
+        <div id="batchStatus" class="muted mt-3">Ready to upload CSV.</div>
+        <div class="overflow-x-auto mt-4">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-white/70">
+                <th class="py-2 pr-4">Index</th>
+                <th class="py-2 pr-4">ID</th>
+                <th class="py-2 pr-4">Probability</th>
+                <th class="py-2 pr-4">Decision</th>
+              </tr>
+            </thead>
+            <tbody id="batchTableBody">
+              <tr><td class="py-2 pr-4 mono">0</td><td class="py-2 pr-4">DEMO-EPIC-0001</td><td class="py-2 pr-4 mono">0.742100</td><td class="py-2 pr-4"><span class="pill success">CONFIRMED</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel p-6">
+        <div class="card-title mb-3">Transit Gallery (Batch)</div>
+        <div id="gallery" class="grid grid-cols-2 gap-3"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="max-w-7xl mx-auto px-4 pb-10">
+    <div class="muted text-xs">© 2025 — Exoplanet AI • Flask demo</div>
+  </footer>
+
+  <div class="audio-widget">
+    <button id="audioToggle" class="btn flex items-center gap-2">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 9v6h4l5 5V4L9 9H5z" stroke="white" stroke-width="1.5"/></svg>
+      Play music
+      <span class="eq"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>
+    </button>
+  </div>
+  <div id="audioPanel" class="hidden fixed right-4 bottom-24 w-[min(92vw,380px)] z-50">
+    <div class="panel p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-semibold">Gateway to the Next Universe</div>
+        </div>
+        <button id="closePanel" class="pill">Close</button>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-2">
+          <span class="muted text-sm">Volume</span>
+          <input id="volumeCtrl" type="range" min="0" max="1" step="0.01" class="w-40" value="0.25">
+        </div>
+        <button id="pausePlay" class="pill">Pause</button>
+      </div>
+    </div>
+  </div>
+  <audio id="bgAudio" preload="auto" playsinline>
+  <source src="{{ url_for('static', filename='music/gateway.mp3') }}" type="audio/mpeg">
+</audio>
+
+
+
+  <script>
+    const $=id=>document.getElementById(id);
+    const formatProb=p=> (typeof p==="number"? p.toFixed(6):"-");
+
+    let meta={ default_threshold:.5, high_precision_threshold:.95, thresholds:{} };
+    let observedChart, modelChart;
+    const PHASE_HALF_WIDTH = 0.20;
+    const N_SAMPLES = 201;
+
+    let lastProb = null;
+    let lastModelName = 'N/A';
+
+    // High-quality textures you already used + a rocky fallback
+  const IMG_HABITABLE = 'https://upload.wikimedia.org/wikipedia/commons/9/96/Kepler186f-ArtistConcept-20140417.jpg';
+  const IMG_ROCKY     = 'https://upload.wikimedia.org/wikipedia/commons/4/4a/Mercury_in_true_color.jpg';
+
+  function setPlanet(habitable=true){
+    const preview = document.getElementById('planetPreview');
+    preview.classList.remove('state-no-transit');
+    preview.classList.add('state-confirmed');
+
+    // choose texture
+    const tex = habitable ? IMG_HABITABLE : IMG_ROCKY;
+    preview.style.setProperty('--planet-img', `url('${tex}')`);
+
+    // caption
+    const cap = document.getElementById('planetCaption');
+    cap.textContent = habitable
+      ? 'Confirmed exoplanet preview — potentially rocky/temperate surface'
+      : 'Confirmed exoplanet preview — rocky/gaseous world';
+  }
+
+  function setNoTransit(){
+    const preview = document.getElementById('planetPreview');
+    preview.classList.remove('state-confirmed');
+    preview.classList.add('state-no-transit');
+
+    const cap = document.getElementById('planetCaption');
+    cap.textContent = 'No transit detected — telescope reticle on starfield';
+  }
+
+    function likelyHabitable(features, prob, label){
+      if(label!=='CONFIRMED') return false;
+      let score=0;
+      if(typeof features.koi_prad==='number' && features.koi_prad>=0.5 && features.koi_prad<=1.8) score++;
+      if(typeof features.koi_period==='number' && features.koi_period>=50 && features.koi_period<=400) score++;
+      if(typeof features.koi_steff==='number' && features.koi_steff>=4700 && features.koi_steff<=6200) score++;
+      if(typeof features.koi_srad==='number' && features.koi_srad>=0.6 && features.koi_srad<=1.3) score++;
+      return (score>=2) || (typeof prob==='number' && prob>=0.85);
+    }
+
+    function getThreshold(model_key="selected_model"){
+      const mode = $('hpSwitch').checked ? "high_precision" : "default";
+      if(meta.thresholds && meta.thresholds[model_key] && meta.thresholds[model_key][mode]){
+        return Number(meta.thresholds[model_key][mode]);
+      }
+      if(model_key==='CNN' && meta.thresholds.CNN && meta.thresholds.CNN[mode]){
+        return Number(meta.thresholds.CNN[mode]);
+      }
+      return (mode==="high_precision" ? (meta.high_precision_threshold||0.95) : (meta.default_threshold||0.5));
+    }
+
+    function updateThrPill(){
+      const t = getThreshold('selected_model');
+      $('hpThr').textContent = t.toFixed(3);
+    }
+
+    async function loadMeta(){
+      const r=await fetch('/api/meta'); 
+      const js=await r.json(); 
+      if(js.ok){
+        meta.thresholds = js.thresholds || {};
+        meta.default_threshold = js.default_threshold ?? (meta.thresholds.default || 0.5);
+        meta.high_precision_threshold = js.high_precision_threshold ?? (meta.thresholds.high_precision || 0.95);
+      }
+      $('modelName').textContent = js.models ? js.models.join(', ') : 'Unknown';
+      $('defaultThr').textContent = (meta.default_threshold??.5).toFixed(3);
+      updateThrPill();
+    }
+
+    function baselineDataset(labels){
+      const length = Array.isArray(labels) ? labels.length : N_SAMPLES;
+      return { label:'Baseline', data: Array.from({length:length},()=>1.0), pointRadius:0, borderWidth:1, borderDash:[6,4], borderColor:'rgba(255,255,255,.3)' };
+    }
+
+    function updateCharts(phase=[], flux=[], fluxModel=null){
+      const ctxObserved=$('lcObserved').getContext('2d'); if(observedChart) observedChart.destroy();
+      observedChart=new Chart(ctxObserved,{ type:'scatter',
+        data:{ datasets:[
+          { label:'Observed/Binned Flux', data:phase.map((p,i)=>({x:p,y:flux[i]})), showLine:true, pointRadius:3, borderColor: '#7c3aed', backgroundColor: '#7c3aed', tension: 0.2 },
+          baselineDataset(phase)
+        ]},
+        options:{
+          parsing:false,
+          plugins:{legend:{display:false}},
+          scales:{
+            x:{ title:{display:true,text:'Phase'}, type:'linear', min: -0.20, max: 0.20 },
+            y:{ title:{display:true,text:'Normalized Flux (baseline = 1)'}, min: 0.9, max: 1.1 }
+          }
+        }
+      });
+
+      const ctxModel=$('lcModel').getContext('2d'); if(modelChart) modelChart.destroy();
+      const datasets = [
+        { label:'Binned Data', data:flux, tension:0, pointRadius:0, borderColor: '#06b6d4', borderWidth: 2 },
+        baselineDataset(phase)
+      ];
+      if (Array.isArray(fluxModel) && fluxModel.length === phase.length) {
+        datasets.unshift({ label:'Model', data: fluxModel, tension:0, pointRadius:0, borderColor:'#f59e0b', borderWidth:1.5, borderDash:[5,4] });
+      }
+      modelChart=new Chart(ctxModel,{ type:'line',
+        data:{ labels:phase.map(p=>p.toFixed(3)), datasets },
+        options:{
+          plugins:{legend:{display:false}},
+          scales:{
+            x:{ title:{display:true,text:'Phase'}, ticks:{maxRotation:0,minRotation:0} },
+            y:{ title:{display:true,text:'Normalized Flux (baseline = 1)'}, min:0.9, max:1.1 }
+          }
+        }
+      });
+      if(window.triggerMeteor) window.triggerMeteor();
+    }
+
+    function updateResultBox(prob, thr, label, model='Tabular'){
+      lastProb = (typeof prob === 'number') ? prob : lastProb;
+      lastModelName = model || lastModelName;
+      const hint = (typeof lastProb === 'number' && lastProb < Math.min(0.5, thr))
+                   ? `<div class="muted text-[11px] mt-1">Hint: prob &lt; both thresholds</div>` : '';
+      $('resultBox').innerHTML=`
+        <div class="text-3xl font-extrabold mono">${formatProb(prob)}</div>
+        <div class="mt-1">${label==='CONFIRMED'
+          ? '<span class="pill success">CONFIRMED</span>'
+          : '<span class="pill danger">FALSE_POSITIVE</span>'}</div>
+        <div class="muted mt-2 text-xs">Model: ${model} - Threshold used: <span class="mono">${thr.toFixed(3)}</span></div>
+        ${hint}
+      `;
+      if(label==='CONFIRMED'){
+        const features = getTabularFeatures();
+        const hab = likelyHabitable(features, prob, label);
+        setPlanet(hab);
+      } else {
+        setNoTransit();
+      }
+    }
+
+    const TABULAR_FEATURE_IDS = ['koi_period','koi_depth','koi_duration','koi_kepmag','koi_prad','koi_srad','koi_steff','koi_depth_err1','koi_duration_err1','koi_period_err1'];
+
+    function getTabularFeatures(){
+      const features = {};
+      TABULAR_FEATURE_IDS.forEach(id => {
+        const v = ($(id)?.value ?? '').trim();
+        features[id] = v === "" ? null : Number(v);
+      });
+      return features;
+    }
+
+    function getAstroParams(){
+      const o = {};
+      o.mission_id = $('astro_mission').value.trim();
+      o.target_id = $('astro_target').value.trim();
+      o.period = Number($('astro_period').value.trim());
+      o.t0 = Number($('astro_t0').value.trim());
+      o.threshold_mode = $('hpSwitch').checked ? "high_precision" : "default";
+      if (!o.mission_id || !o.target_id || isNaN(o.period) || isNaN(o.t0)) return null;
+      return o;
+    }
+
+    function setAstroStatus(msg, isError=false){
+      $('astroStatus').className = `mt-3 text-sm ${isError ? 'text-red-400' : 'muted'}`;
+      $('astroStatus').textContent = msg;
+    }
+
+    const PRESETS={
+      1:{koi_period:100.0, koi_depth:2100, koi_duration:11.2, koi_kepmag:14.5, koi_prad:1.9, koi_srad:1.1, koi_steff:5800, koi_depth_err1:25, koi_duration_err1:0.05, koi_period_err1:0.015, astro_mission:"TESS", astro_target:"247008310", astro_period:37.4243, astro_t0:2458872.2858},
+      2:{koi_period:1.12, koi_depth:8000, koi_duration:2, koi_kepmag:13, koi_prad:1.1, koi_srad:0.8, koi_steff:5000, koi_depth_err1:500, koi_duration_err1:0.01, koi_period_err1:0.0001, astro_mission:"TESS", astro_target:"198282365", astro_period:2.909, astro_t0:2458310.113}
+    };
+    function setPreset(n){
+      const p=PRESETS[n]; if(!p) return;
+      TABULAR_FEATURE_IDS.forEach(k=>{ if($(k)) $(k).value=(p[k]===null? "" : p[k]); });
+      $('astro_mission').value = p.astro_mission;
+      $('astro_target').value = p.astro_target;
+      $('astro_period').value = p.astro_period;
+      $('astro_t0').value = p.astro_t0;
+    }
+
+    async function doPredictTabular(){
+      const features = getTabularFeatures();
+      const threshold_mode = $('hpSwitch').checked ? "high_precision" : "default";
+      const thr = getThreshold('selected_model');
+
+      try{
+        const r = await fetch('/api/predict/tabular', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ features, model: "SELECTED", threshold_mode })
+        });
+        const js = await r.json();
+        if (!r.ok || !js.ok) {
+          updateResultBox(0, thr, 'ERROR', 'Tabular');
+          return setAstroStatus(`Tabular Prediction Error: ${js.error || 'Prediction failed'}`, true);
+        }
+        const prob = js.prob;
+        const label = (prob >= thr) ? 'CONFIRMED' : 'FALSE_POSITIVE';
+        lastProb = prob; lastModelName = `Tabular (${js.model})`;
+        updateResultBox(prob, thr, label, lastModelName);
+        setAstroStatus(`Tabular Prediction OK. Prob: ${formatProb(prob)}`, false);
+
+        const depth_frac = features.koi_depth ? (features.koi_depth / 1_000_000) : 0.01;
+        const duration_frac = (features.koi_duration && features.koi_period) ? (features.koi_duration / 24) / features.koi_period : 0.1;
+        const rr = await fetch('/api/lightcurve/synthetic', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ n:N_SAMPLES, depth:depth_frac, duration:duration_frac })
+        });
+        const lc = await rr.json();
+        updateCharts(lc.phase, lc.observed, lc.model);
+
+      } catch(e){
+        updateResultBox(0, 0.5, 'ERROR', 'Tabular');
+        setAstroStatus(`Network Error during Tabular call: ${e.message}`, true);
+      }
+    }
+
+    async function doPredictAstronomical(){
+      const params = getAstroParams();
+      if(!params) return setAstroStatus("ERROR: Missing Mission ID, Target ID, Period, or T0 for CNN.", true);
+      const thr = getThreshold('CNN');
+      setAstroStatus(`Fetching LC for ${params.mission_id}:${params.target_id} ...`, false);
+
+      try{
+        const r = await fetch('/api/predict/astronomical', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params)
+        });
+        const js = await r.json();
+        if (!r.ok || !js.ok) {
+          updateResultBox(0, thr, 'ERROR', 'CNN');
+          return setAstroStatus(`Error (${r.status}): ${js.error || 'Astronomical prediction failed.'}`, true);
+        }
+        const prob = js.prob;
+        const label = (prob >= thr) ? 'CONFIRMED' : 'FALSE_POSITIVE';
+        lastProb = prob; lastModelName = 'CNN';
+        updateResultBox(prob, thr, label, lastModelName);
+        updateCharts(js.lightcurve.phase, js.lightcurve.flux);
+        setAstroStatus(`CNN Prediction OK. Prob: ${formatProb(prob)}`, false);
+
+      } catch(e){
+        updateResultBox(0, 0.5, 'ERROR', 'CNN');
+        setAstroStatus(`Network Error during CNN call: ${e.message}`, true);
+      }
+    }
+
+    async function doPredictEnsemble(alpha = 0.7){
+      const tabularFeatures = getTabularFeatures();
+      const astroParams = getAstroParams();
+      const threshold_mode = $('hpSwitch').checked ? "high_precision" : "default";
+      if(!astroParams) return setAstroStatus("ERROR: Missing LC parameters for CNN.", true);
+
+      setAstroStatus("Starting Ensemble: Getting Tabular & CNN probabilities...", false);
+
+      try {
+        const rTab = await fetch('/api/predict/tabular', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ features:tabularFeatures, model:"SELECTED", threshold_mode })
+        });
+        const jsTab = await rTab.json();
+        if (!rTab.ok || !jsTab.ok) return setAstroStatus(`Error: Tabular prediction failed (${jsTab.error || 'Unknown'}).`, true);
+        const p_tab = jsTab.prob;
+
+        const rAst = await fetch('/api/predict/astronomical', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify(astroParams)
+        });
+        const jsAst = await rAst.json();
+        if (!rAst.ok || !jsAst.ok) return setAstroStatus(`Error: CNN failed (${jsAst.error || 'LC not found'}).`, true);
+        const p_cnn = jsAst.prob;
+        const phase = jsAst.lightcurve.phase;
+        const flux  = jsAst.lightcurve.flux;
+
+        const thr = getThreshold('selected_model');
+        const prob = alpha*p_tab + (1-alpha)*p_cnn;
+        const label = (prob >= thr) ? 'CONFIRMED' : 'FALSE_POSITIVE';
+        lastProb = prob; lastModelName = `Ensemble (α=${alpha})`;
+
+        updateResultBox(prob, thr, label, lastModelName);
+        updateCharts(phase, flux);
+        setAstroStatus(`Ensemble Prediction OK. Final Prob: ${formatProb(prob)}`, false);
+
+      } catch(e){
+        updateResultBox(0, 0.5, 'ERROR', 'Ensemble');
+        setAstroStatus(`Network Error during Ensemble chain: ${e.message}`, true);
+      }
+    }
+
+    function reRenderWithCurrentThreshold(){
+      if (typeof lastProb !== 'number') return;
+      const thr = getThreshold('selected_model');
+      const label = (lastProb >= thr) ? 'CONFIRMED' : 'FALSE_POSITIVE';
+      updateThrPill();
+      updateResultBox(lastProb, thr, label, lastModelName);
+    }
+
+    function startStarfield(){
+      const c=$('starfield'), ctx=c.getContext('2d'); let w,h,stars;
+      const COUNT=340, speed=.05;
+      function resize(){ w=c.width=innerWidth; h=c.height=innerHeight;
+        stars=Array.from({length:COUNT},()=>({ x:Math.random()*w, y:Math.random()*h, z:Math.random()*1+.2, r:Math.random()*1.3+.2 })); }
+      addEventListener('resize', resize); resize();
+      (function step(){
+        ctx.clearRect(0,0,w,h);
+        for(const s of stars){ s.x+=speed*s.z*2; if(s.x>w) s.x=0;
+          ctx.beginPath(); ctx.fillStyle=`rgba(255,255,255,${.55*s.z+.2})`; ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }
+        requestAnimationFrame(step);
+      })();
+    }
+    function startNumbersRain(){
+      const c=$('numbers'), ctx=c.getContext('2d'); let w,h,cols,drops;
+      const size=14, digits='0123456789';
+      function resize(){ w=c.width=innerWidth; h=c.height=innerHeight; cols=Math.floor(w/size); drops=new Array(cols).fill(1); }
+      addEventListener('resize', resize); resize();
+      (function step(){
+        ctx.fillStyle='rgba(0,0,0,.08)'; ctx.fillRect(0,0,w,h);
+        ctx.fillStyle='rgba(173,216,230,.8)';
+        ctx.font = `${size}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace`;
+        for(let i=0;i<drops.length;i++){ const t=digits[Math.floor(Math.random()*digits.length)];
+          const x=i*size, y=drops[i]*size; ctx.fillText(t,x,y);
+          if(y>h && Math.random()>.975) drops[i]=0; drops[i]++; }
+        requestAnimationFrame(step);
+      })();
+    }
+    function startSingleMeteor(){
+      const c=$('meteors'), ctx=c.getContext('2d'); let w,h; let meteor=null; let timer=null;
+      function resize(){ w=c.width=innerWidth; h=c.height=innerHeight; }
+      addEventListener('resize', resize); resize();
+      function flash(){
+        const html=document.documentElement;
+        html.classList.add('meteor-pass'); $('flashLayer').style.opacity=.33;
+        setTimeout(()=>{ $('flashLayer').style.opacity=0; html.classList.remove('meteor-pass'); }, 650);
+      }
+      function spawn(){ if(meteor) return; meteor={ x:-120, y:Math.random()*h*0.6 + h*0.1, len:180+Math.random()*120, speed:7+Math.random()*3, angle:Math.PI/6 + Math.random()*Math.PI/24, life:0, ttl:220 }; flash(); }
+      function schedule(){ clearTimeout(timer); timer=setTimeout(()=>{ spawn(); schedule(); }, 20000 + Math.random()*8000); }
+      schedule();
+      (function step(){
+        ctx.clearRect(0,0,w,h);
+        if(meteor){ meteor.life++; meteor.x += Math.cos(meteor.angle)*meteor.speed; meteor.y += Math.sin(meteor.angle)*meteor.speed*0.85;
+          const tail = { x: meteor.x - Math.cos(meteor.angle)*meteor.len, y: meteor.y - Math.sin(meteor.angle)*meteor.len };
+          const grd = ctx.createLinearGradient(meteor.x,meteor.y,tail.x,tail.y);
+          grd.addColorStop(0,'rgba(255,255,255,.95)'); grd.addColorStop(1,'rgba(255,255,255,0)');
+          ctx.strokeStyle = grd; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(meteor.x, meteor.y); ctx.lineTo(tail.x, tail.y); ctx.stroke();
+          ctx.fillStyle='rgba(255,255,255,.92)'; ctx.beginPath(); ctx.arc(meteor.x, meteor.y, 2.2, 0, Math.PI*2); ctx.fill();
+          if(meteor.life>meteor.ttl || meteor.x> w+180 || meteor.y>h+180){ meteor=null; }
+        }
+        requestAnimationFrame(step);
+      })();
+      window.triggerMeteor = ()=>spawn();
+    }
+    function setupAudio(){
+  const audio = document.getElementById('bgAudio');
+  const toggle = document.getElementById('audioToggle');
+  const panel  = document.getElementById('audioPanel');
+  const closePanel = document.getElementById('closePanel');
+  const pauseBtn = document.getElementById('pausePlay');
+  const vol = document.getElementById('volumeCtrl');
+
+  // Use only your local file already defined on the <audio> tag
+  audio.volume = 0.25;
+
+  // Build WebAudio filter for smooth tone
+  let ctx, nodeSrc, filter, gain;
+  function ensureGraph(){
+      if(ctx) return;
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      nodeSrc = ctx.createMediaElementSource(audio);
+      filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 4200;
+      gain = ctx.createGain();
+      gain.gain.value = 1.0;
+      nodeSrc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+    }
+
+    // Handle open button (bottom right Play)
+    toggle.addEventListener('click', async ()=>{
+      panel.classList.remove('hidden');
+      ensureGraph();
+      try{
+        await audio.play();
+        if(ctx.state === 'suspended') await ctx.resume();
+        toggle.innerHTML = 'Playing Music <span class="eq"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></span>';
+      }catch(e){
+        console.warn('Autoplay blocked until user gesture:', e);
+      }
+    });
+
+    // Close panel
+    closePanel?.addEventListener('click', ()=>panel.classList.add('hidden'));
+
+    // Pause / Play inside panel
+    let paused = false;
+    pauseBtn?.addEventListener('click', async function(){
+      if(paused){
+        try{
+          await audio.play();
+          if(ctx && ctx.state === 'suspended') await ctx.resume();
+          paused = false;
+          this.textContent = 'Pause';
+        }catch(e){}
+      } else {
+        audio.pause();
+        if(ctx) await ctx.suspend();
+        paused = true;
+        this.textContent = 'Play';
+      }
+    });
+
+    // Volume control
+    vol?.addEventListener('input', ()=>{
+      audio.volume = parseFloat(vol.value);
+    });
+  }
+
+    $('batchForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const fd=new FormData(); const file=$('csvFile').files[0];
+      if(!file){ alert('Select a CSV first.'); return; }
+      fd.append('file', file);
+
+      const mode = $('hpSwitch').checked ? "high_precision" : "default";
+      const r=await fetch(`/api/predict/batch?threshold_mode=${mode}`,{method:'POST',body:fd});
+      const js=await r.json();
+
+      if(!r.ok || !js.ok){
+        $('batchStatus').textContent=js.detail||js.error||'Upload failed.';
+        return;
+      }
+      const thrUsed = js.threshold_used ?? getThreshold('selected_model');
+      const rows=(js.batch_results || []).map((o)=>({
+        Index: o.Index, ID: o.ID, proba_tabular: o.proba_tabular, decision: o.decision
+      }));
+
+      $('batchStatus').textContent=`Predicted ${rows.length} rows using threshold ${Number(thrUsed).toFixed(3)}.`;
+      const tb=$('batchTableBody'); tb.innerHTML='';
+      rows.forEach(row=>{
+        tb.insertAdjacentHTML('beforeend', `<tr>
+          <td class="py-2 pr-4 mono">${row.Index}</td>
+          <td class="py-2 pr-4">${row.ID}</td>
+          <td class="py-2 pr-4 mono">${formatProb(row.proba_tabular)}</td>
+          <td class="py-2 pr-4">${row.decision==='CONFIRMED' ? '<span class="pill success">CONFIRMED</span>' : '<span class="pill danger">FALSE_POSITIVE</span>'}</td>
+        </tr>`);
+      });
+
+      const gal=$('gallery'); gal.innerHTML='';
+      const features=getTabularFeatures();
+      const synthetic_depth = features.koi_depth ? features.koi_depth / 1_000_000 : 0.01;
+      const synthetic_duration = (features.koi_duration && features.koi_period) ? (features.koi_duration/24)/features.koi_period : 0.1;
+
+      for(const row of rows.slice(0,6)){
+        const rr=await fetch('/api/lightcurve/synthetic',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ n:N_SAMPLES, depth:synthetic_depth, duration:synthetic_duration })
+        });
+        const lc=await rr.json();
+        const canvas=document.createElement('canvas'); canvas.height=120; canvas.className='bg-[#0f1636]/40 rounded-xl p-2 border border-white/10';
+        gal.appendChild(canvas);
+        new Chart(canvas.getContext('2d'),{
+          type:'line',
+          data:{ labels: lc.phase, datasets:[
+            { data: lc.observed, pointRadius:0, tension:0, borderColor: '#7c3aed', borderWidth: 1.5 },
+            baselineDataset(lc.phase)
+          ]},
+          options:{ plugins:{legend:{display:false}}, scales:{ x:{display:false}, y:{display:false} } }
+        });
+      }
+    });
+
+    (async function(){
+      await loadMeta();
+      startStarfield(); startNumbersRain(); startSingleMeteor();
+      setupAudio(); setPlanet(true);
+      setPreset(1);
+
+      const rr=await fetch('/api/lightcurve/synthetic',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({n: N_SAMPLES})});
+      const lc=await rr.json();
+      updateCharts(lc.phase, lc.observed, lc.model);
+      updateResultBox(0.5, 0.5, 'NO DATA', 'N/A');
+
+      const rows=[["koi_period","koi_depth","koi_duration","koi_kepmag","koi_prad","koi_srad","koi_steff","koi_depth_err1","koi_duration_err1","koi_period_err1"],
+        [100.0,2100,11.2,14.5,1.9,1.1,5800,25,0.05,0.015]];
+      $('downloadCsv').setAttribute('href',"data:text/csv;charset=utf-8,"+encodeURIComponent(rows.map(r=>r.join(",")).join("\n")));
+    })();
+
+    $('preset1').addEventListener('click',()=>setPreset(1));
+    $('preset2').addEventListener('click',()=>setPreset(2));
+    $('btnPredictTabular').addEventListener('click',()=>doPredictTabular());
+    $('btnPredictAstronomical').addEventListener('click',()=>doPredictAstronomical());
+    $('btnEnsemble').addEventListener('click',()=>doPredictEnsemble());
+    $('hpSwitch').addEventListener('change', ()=>{
+      updateThrPill();
+      reRenderWithCurrentThreshold();
+    });
+  </script>
+</body>
+</html>
