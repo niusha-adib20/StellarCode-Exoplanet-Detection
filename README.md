@@ -1,147 +1,126 @@
 # 🌌 StellarCode — Exoplanet Detection
 
-An astronomy-focused machine learning project that helps identify potential exoplanets using data from NASA's Kepler, K2, and TESS missions. The project combines a tabular classifier with a 1D Convolutional Neural Network (CNN) for stellar light curves and presents predictions through an interactive Flask web application.
+A Flask web application for exploring exoplanet candidate classification with tabular machine learning and Kepler, K2, and TESS light-curve data. It includes a saved tabular model, an optional 1D CNN for light curves, batch prediction, and an interactive web interface.
 
-## ✨ Features
+> **Research note:** Predictions are exploratory and educational. They do not confirm an exoplanet; confirmation requires scientific follow-up and validation.
 
-- **Tabular classification:** Predicts whether a candidate is likely to be a confirmed exoplanet or a false positive using measured planetary and stellar properties.
-- **Light-curve analysis:** Retrieves public light-curve data for a target, preprocesses and phase-folds the signal, then evaluates it with a 1D CNN.
-- **Combined prediction:** Offers an ensemble workflow that combines tabular and CNN-based predictions when the CNN model is available.
-- **Batch inference:** Accepts multiple records as JSON rows or a CSV upload.
-- **Decision-threshold options:** Supports default, high-precision, and Youden-style threshold modes where configured.
-- **Interactive web interface:** A space-themed UI for entering candidate data, running predictions, and viewing results.
+## Features
 
-> **Important:** This project provides machine-learning predictions for exploration and educational use. Its outputs should not be treated as scientific confirmation of an exoplanet.
+- **Tabular classification:** Classifies candidate records as `CONFIRMED` or `FALSE_POSITIVE` from the features expected by the saved model.
+- **Mission light curves:** Searches public Kepler, K2, or TESS light-curve products with Lightkurve, folds the signal using a supplied period and transit epoch, and runs the CNN when its model is installed.
+- **Batch inference:** Accepts a list of JSON rows or a CSV upload.
+- **Decision thresholds:** Supports `default`, `high_precision`, and `youden` threshold modes; thresholds come from the saved artifacts where available and otherwise use application defaults.
+- **Web interface:** Provides a browser-based form and visualizations for prediction workflows.
 
-## 🧠 How It Works
+The `/api/predict/ensemble` route is a demo fusion workflow: it combines the tabular score with a **synthetic** light curve generated from the submitted candidate's transit depth. It does not use the target's downloaded mission light curve. Use `/api/predict/astronomical` for inference on a retrieved mission light curve.
 
-### 1. Tabular model
-The tabular pipeline uses candidate features such as orbital period, transit duration and depth, planet radius, stellar radius/temperature, and magnitude-related measurements. Missing values are handled with a fitted imputer, and selected skewed features are represented with log-transformed values. The saved model and preprocessing artifacts are loaded by the Flask application.
+## How the models work
 
-### 2. Light-curve CNN
-For astronomical inference, the app can search for a target's light curve through [Lightkurve](https://lightkurve.github.io/), which accesses publicly available mission data. The signal is normalized, aligned to the supplied transit epoch, phase-folded around the transit, clipped for extreme values, binned to a fixed-length sequence, and passed to a 1D CNN.
+### Tabular model
 
-Supported mission identifiers include **TESS**, **Kepler**, and **K2**. A target identifier, orbital period, and transit epoch (`t0`) are required for this workflow.
+The application loads `koi_toi_artifacts.pkl` at startup. This artifact contains the fitted imputer, feature list, and selected classifier. Feature values are aligned to that list; columns named `log_...` are computed from their base feature before imputation. The expected feature names can be read from `koi_toi_features.json` or returned by `GET /api/meta`.
 
-### 3. Combined workflow
-The application includes an ensemble endpoint that combines the tabular prediction with a CNN-based signal when available. The final label depends on the probability and the selected decision threshold.
+The training notebook combines KOI and TOI catalog data, maps a shared feature set, and saves the inference artifact. It evaluates Random Forest and, when installed, XGBoost and CatBoost; the final saved inference model is a selected single classifier.
 
-## 🛠️ Tech Stack
+### Light-curve CNN
 
-- **Language:** Python
-- **Web application:** Flask, Flask-CORS, HTML, CSS, JavaScript
-- **Data processing:** NumPy, pandas, scikit-learn
-- **Deep learning:** TensorFlow / Keras
-- **Astronomy data:** Lightkurve, Astropy
-- **Additional model libraries:** XGBoost, CatBoost
-- **Visualization / interface:** Plotly and custom frontend components
+When TensorFlow and `cnn_lc_boosted.keras` are available, the application can classify either a downloaded mission light curve or user-supplied phase/flux arrays. Mission retrieval needs an internet connection and a public data product for the target. The downloaded signal is normalized, folded around the supplied epoch and period, clipped, binned, and passed to the CNN. CNN metadata and thresholds are loaded from `cnn_artifacts_boost.pkl` when present.
 
-## 📁 Project Structure
+The CNN is optional for starting the web app. CNN-specific endpoints return an error when the model is unavailable; the demo ensemble route falls back to a simple synthetic-signal heuristic.
+
+## Tech stack
+
+Python, Flask, Flask-CORS, NumPy, pandas, scikit-learn, TensorFlow/Keras, Lightkurve, Astropy, XGBoost, CatBoost, Plotly, and browser-side HTML/CSS/JavaScript.
+
+## Repository layout
 
 ```text
-StellarCode-Exoplanet-Detection/
-├── app.py                              # Flask app and prediction API
+.
+├── app.py
 ├── templates/
-│   └── index.html                      # Web interface
+│   └── index.html
 ├── statics/
 │   └── music/
-│       └── gateway.mp3                 # Optional UI background audio
-├── koi_toi_artifacts.pkl               # Saved tabular model and preprocessing
-├── koi_toi_features.json               # Tabular model feature list
-├── cnn_lc_boosted.keras                # Saved light-curve CNN
-├── cnn_artifacts_boost.pkl             # CNN metadata and thresholds
-├── requirements.txt                    # Python dependencies
+│       └── gateway.mp3
+├── koi_toi_artifacts.pkl
+├── koi_toi_features.json
+├── cnn_lc_boosted.keras
+├── cnn_artifacts_boost.pkl
+├── requirements.txt
 └── train_model_code/
     ├── cnn/
-    │   ├── cnn.ipynb                   # CNN training workflow
+    │   ├── cnn.ipynb
     │   └── tess_koi_lc_rescued_clip8.npz
     ├── machine_learning_code/
-    │   └── model.ipynb                 # Tabular model training workflow
+    │   └── model.ipynb
     └── data/
         ├── koi.csv
         ├── toi.csv
         └── k2.csv
 ```
 
-## 🚀 Getting Started
+## Getting started
 
-### Prerequisites
+### Requirements
 
-- Python **3.11** is recommended (the training notebook metadata uses Python 3.11).
+- Python 3.11 is the version recorded in the training notebook metadata; use a compatible Python environment for the pinned packages in `requirements.txt`.
 - Git
-- Internet access for fetching mission light curves
-- Enough memory and disk space for the scientific Python dependencies and saved models
+- Internet access for retrieving mission light curves
 
-### 1. Clone the repository
+### Install and run
 
 ```bash
 git clone https://github.com/niusha-adib20/StellarCode-Exoplanet-Detection.git
 cd StellarCode-Exoplanet-Detection
+python -m venv .venv
 ```
 
-### 2. Create and activate a virtual environment
+Activate the environment:
 
-**Windows (PowerShell):**
+**Windows PowerShell**
 ```powershell
-python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-**macOS / Linux:**
+**macOS / Linux**
 ```bash
-python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install dependencies
+Install the pinned dependencies and start the application:
 
 ```bash
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Run the application
-
-```bash
+python -m pip install -r requirements.txt
 python app.py
 ```
 
-The Flask app uses port **8000** by default. Open [http://localhost:8000](http://localhost:8000) in your browser. If the `PORT` environment variable is set, the application uses that port instead.
+Open [http://localhost:8000](http://localhost:8000). The app listens on port `8000` by default and uses the `PORT` environment variable when set.
 
-The repository includes saved model artifacts, so the app expects these files to be present at the project root. If an artifact is missing or incompatible with your installed library versions, model loading or predictions may fail.
+The tabular artifact `koi_toi_artifacts.pkl` is required for tabular prediction. The CNN model and metadata files enable the CNN workflows; if the model is absent or TensorFlow cannot load it, CNN inference is disabled. Artifact files must be compatible with the installed library versions.
 
-## 🔭 Using the Application
+## Using the application
 
-### Tabular prediction
-Enter the available candidate and stellar measurements in the web form, then run a prediction. The app returns a probability, predicted label, and the decision threshold used.
+- **Tabular:** Submit candidate measurements using the feature names listed by `GET /api/meta`.
+- **Astronomical:** Select TESS, Kepler, or K2 and provide a target ID, orbital period in days, and transit epoch `t0`. The epoch may be JD, BTJD, or BKJD as supported by the application.
+- **Batch:** Send JSON containing a `rows` array or upload a CSV file using the multipart field `file`.
 
-### Astronomical light-curve prediction
-Choose a mission (**TESS**, **Kepler**, or **K2**) and provide:
-- Target identifier
-- Orbital period in days
-- Transit epoch `t0` (JD, BTJD, or BKJD, as appropriate)
-
-The app attempts to retrieve available public light-curve data, preprocesses the signal, and returns the CNN probability and phase-folded light curve.
-
-### Batch prediction
-Upload a CSV file through the batch form to classify multiple candidates in one request.
-
-## 🔌 API Endpoints
+## API
 
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/` | Serves the web interface |
-| GET | `/api/meta` | Returns model metadata, available thresholds, and endpoint information |
-| POST | `/api/predict/tabular` | Predicts from one candidate's tabular features |
-| POST | `/api/predict/batch` | Predicts from JSON rows or an uploaded CSV |
-| POST | `/api/predict/astronomical` | Retrieves and classifies a mission light curve |
-| POST | `/api/predict/lc_cnn` | Classifies a supplied phase/flux light curve with the CNN |
-| POST | `/api/predict/ensemble` | Combines tabular and CNN-based predictions when available |
-| POST | `/api/lightcurve/synthetic` | Generates a synthetic light curve for the app workflow |
+| GET | `/api/meta` | Returns the loaded feature list, model status, thresholds, and endpoint names |
+| POST | `/api/predict/tabular` | Classifies one tabular candidate |
+| POST | `/api/predict/batch` | Classifies JSON rows or an uploaded CSV |
+| POST | `/api/predict/astronomical` | Retrieves a mission light curve and classifies it with the CNN |
+| POST | `/api/predict/lc_cnn` | Classifies supplied phase/flux arrays with the CNN |
+| POST | `/api/predict/ensemble` | Combines tabular probability with a synthetic-light-curve CNN/heuristic score |
+| POST | `/api/lightcurve/synthetic` | Generates a synthetic light curve for the UI workflow |
 
-### Example: tabular prediction request
+### Tabular prediction example
 
-The API accepts either a nested `features` object or a flat JSON object with feature names expected by the saved model.
+Send either a nested `features` object or a flat JSON object. This example is illustrative; your model may require additional inputs. Check `/api/meta` for the complete feature list.
 
 ```bash
 curl -X POST http://localhost:8000/api/predict/tabular \
@@ -159,26 +138,24 @@ curl -X POST http://localhost:8000/api/predict/tabular \
   }'
 ```
 
-This is an illustrative request only: the saved model may require additional features. Check `/api/meta` for the complete `feature_list`.
+## Training
 
-## 🧪 Model Training
+The notebooks under `train_model_code/` contain the training workflows:
 
-The training notebooks are in `train_model_code/`:
+- `machine_learning_code/model.ipynb` prepares and evaluates tabular classifiers and saves the tabular inference artifacts.
+- `cnn/cnn.ipynb` trains and evaluates the light-curve CNN using the prepared `.npz` dataset.
 
-- `machine_learning_code/model.ipynb` — trains and evaluates tabular classifiers, including Random Forest, XGBoost, CatBoost when available, and a probability-averaging ensemble.
-- `cnn/cnn.ipynb` — trains a 1D CNN for phase-folded light curves and evaluates performance with metrics such as precision, recall, F1, and ROC-AUC.
+Follow the data paths and setup cells in each notebook when retraining. The runtime application consumes the saved artifacts at the repository root.
 
-The training workflow saves model and preprocessing artifacts consumed by `app.py`. To retrain the models, open the corresponding notebook and follow its data paths and setup cells.
+## Limitations
 
-## ⚠️ Notes and Limitations
+- Classification quality depends on input quality, training data, preprocessing, artifact versions, and the selected threshold.
+- Mission light-curve predictions require an available public data product and a working network connection.
+- `/api/predict/ensemble` uses a generated synthetic signal, so its CNN score is not based on measured photometry for the submitted target.
+- The application is a project and exploration tool, not an official NASA service or a substitute for scientific validation.
+- The repository pins many dependencies. TensorFlow and other scientific packages can have platform-specific installation constraints.
 
-- Results depend on the supplied measurements, available mission data, preprocessing choices, saved model versions, and decision threshold.
-- Light-curve retrieval requires internet access and an available public data product for the selected target.
-- Some tabular features may be mission-specific; the training notebook maps a shared feature set between the KOI and TOI catalogues.
-- The project is an exploration tool, not a substitute for peer-reviewed analysis or confirmation by an astronomy team.
-- `requirements.txt` pins many package versions. If installation fails on your platform, use a clean Python 3.11 environment and consult the package-specific installation instructions, especially for TensorFlow.
-
-## 📚 Data and References
+## Data and references
 
 - [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/)
 - [NASA TESS Mission](https://science.nasa.gov/mission/tess/)
@@ -187,10 +164,6 @@ The training workflow saves model and preprocessing artifacts consumed by `app.p
 - [TensorFlow documentation](https://www.tensorflow.org/)
 - [Flask documentation](https://flask.palletsprojects.com/)
 
-## 📄 License
+## License
 
-See the [LICENSE](LICENSE) file for the license that applies to this repository.
-
----
-
-Built with Python, machine learning, and a little cosmic curiosity. ✨
+This project is distributed under the [MIT License](LICENSE).
